@@ -1,0 +1,188 @@
+name: Sponsorship Email Scraper
+description: Visit sponsor/contact pages, click Contact, collect public emails, and email a CSV.
+env:
+  - file: .env
+
+inputs:
+  targets_file:
+    type: file
+    default: targets.csv
+
+variables:
+  out_csv: emails.csv
+  click_selectors:
+    - "a:has-text('Contact Us')"
+    - "a:has-text('Contact')"
+    - "a:has-text('Press')"
+    - "a:has-text('Media')"
+    - "a:has-text('PR')"
+    - "a:has-text('Partnership')"
+    - "a:has-text('Partner')"
+    - "a:has-text('Creators')"
+    - "button:has-text('Contact')"
+    - "a[aria-label*='Contact' i]"
+    - "a[href*='contact' i]"
+    - "a[href*='press' i]"
+    - "a[href*='media' i]"
+    - "a[href*='partner' i]"
+    - "a[href*='creator' i]"
+  email_regex: "(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}"
+
+steps:
+  - id: read_targets
+    uses: csv.read
+    with:
+      path: "${{ inputs.targets_file }}"
+    outputs:
+      rows: targets_rows
+
+  - id: init_store
+    uses: data.init
+    with:
+      schema:
+        - name: brand
+          type: string
+        - name: source
+          type: string
+        - name: email
+          type: string
+    outputs:
+      handle: emails_store
+
+  - id: loop_targets
+    uses: control.for_each
+    with:
+      items: "${{ steps.read_targets.outputs.rows }}"
+      as: row
+      steps:
+        - id: goto_page
+          uses: browser.goto
+          with:
+            url: "${{ row.url }}"
+            wait_until: domcontentloaded
+            timeout_ms: 30000
+
+        - id: try_click_contact
+          uses: control.first_success
+          with:
+            steps:
+              - uses: browser.click_if_present
+                with:
+                  selector: "${{ variables.click_selectors[0] }}"
+                  wait_for_navigation: true
+                  timeout_ms: 6000
+              - uses: browser.click_if_present
+                with:
+                  selector: "${{ variables.click_selectors[1] }}"
+                  wait_for_navigation: true
+                  timeout_ms: 6000
+              - uses: browser.click_if_present
+                with:
+                  selector: "${{ variables.click_selectors[2] }}"
+                  wait_for_navigation: true
+                  timeout_ms: 6000
+              - uses: browser.click_if_present
+                with:
+                  selector: "${{ variables.click_selectors[3] }}"
+                  wait_for_navigation: true
+                  timeout_ms: 6000
+              - uses: browser.click_if_present
+                with:
+                  selector: "${{ variables.click_selectors[4] }}"
+                  wait_for_navigation: true
+                  timeout_ms: 6000
+              - uses: browser.click_if_present
+                with:
+                  selector: "${{ variables.click_selectors[5] }}"
+                  wait_for_navigation: true
+                  timeout_ms: 6000
+              - uses: browser.click_if_present
+                with:
+                  selector: "${{ variables.click_selectors[6] }}"
+                  wait_for_navigation: true
+                  timeout_ms: 6000
+              - uses: browser.click_if_present
+                with:
+                  selector: "${{ variables.click_selectors[7] }}"
+                  wait_for_navigation: true
+                  timeout_ms: 6000
+              - uses: browser.click_if_present
+                with:
+                  selector: "${{ variables.click_selectors[8] }}"
+                  wait_for_navigation: true
+                  timeout_ms: 6000
+              - uses: control.noop  # if none clicked, proceed anyway
+
+        - id: get_page_text
+          uses: browser.get_text
+          with:
+            selector: "body"
+            fallback_to_content: true
+          outputs:
+            text: body_text
+
+        - id: extract_emails
+          uses: text.regex_find_all
+          with:
+            pattern: "${{ variables.email_regex }}"
+            text: "${{ steps.get_page_text.outputs.text }}"
+          outputs:
+            matches: raw_emails
+
+        - id: filter_emails
+          uses: data.filter_list
+          with:
+            items: "${{ steps.extract_emails.outputs.matches }}"
+            exclude_if_contains:
+              - "noreply@"
+              - "no-reply@"
+              - "donotreply@"
+          outputs:
+            items: filtered_emails
+
+        - id: store_emails
+          uses: control.for_each
+          with:
+            items: "${{ steps.filter_emails.outputs.items }}"
+            as: email
+            steps:
+              - uses: data.append
+                with:
+                  handle: "${{ steps.init_store.outputs.handle }}"
+                  row:
+                    brand: "${{ row.brand }}"
+                    source: "${{ browser.current_url }}"
+                    email: "${{ email }}"
+
+        - id: polite_delay
+          uses: control.sleep
+          with:
+            seconds: 2
+
+  - id: dedupe
+    uses: data.dedupe
+    with:
+      handle: "${{ steps.init_store.outputs.handle }}"
+      by:
+        - email
+
+  - id: write_csv
+    uses: csv.write
+    with:
+      handle: "${{ steps.init_store.outputs.handle }}"
+      path: "${{ variables.out_csv }}"
+
+  - id: email_results
+    uses: email.smtp_send
+    with:
+      host: "${{ env.SMTP_HOST }}"
+      port: "${{ env.SMTP_PORT }}"
+      username: "${{ env.SMTP_USER }}"
+      password: "${{ env.SMTP_PASS }}"
+      from: "${{ env.SMTP_USER }}"
+      to:
+        - "${{ env.MAIL_TO }}"
+      subject: "[Sponsorship Bot] results"
+      text: "Attached are the deduped emails scraped from your targets."
+      attachments:
+        - path: "${{ variables.out_csv }}"
