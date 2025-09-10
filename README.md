@@ -26,3 +26,17 @@ Install dependencies with:
 
 ```bash
 pip install -r requirements.txt
+
+**## Setup**
+Create a .env file in the project root with your SMTP credentials:
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your_email@gmail.com
+SMTP_PASS=your_app_password
+MAIL_TO=recipient@email.com
+
+Prepare a targets.csv with at least two columns:
+
+brand,url
+Brand A,https://example.com
+Brand B,https://anotherexample.com
